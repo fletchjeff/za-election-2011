@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html class="ocks-org do-not-copy">
+<meta charset="utf-8">
+<title>D3 + Leaflet</title>
+<style>
+@import url(//cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.5/leaflet.css);
+@import url(style.css);
+</style>
+
+<body>
+<h1>2011 Municipal Elections</h1>
+    <div id="info_block">
+        <div id="info_table">
+            <table>
+                <tr>
+                    <td class="td_head">
+                        Municipality:
+                    </td>
+                    <td id="td_munic" colspan="3" class="td_data">
+                    </td>
+                </tr>
+                <tr>
+                    <td class="td_head">
+                        Ward No:
+                    </td>
+                    <td id="td_ward" class="td_data">
+                    </td>
+                    <td class="td_head">
+                        Area:
+                    </td>
+                    <td id="td_area" class="td_data">
+                    </td>
+                </tr>
+                <tr>
+                    <td class="td_head">
+                        Turnout
+                    </td>
+                    <td id="td_turnout" class="td_data">
+                    </td>
+                    <td class="td_head">
+                        Margin
+                    </td>
+                    <td id="td_margin" class="td_data">
+                    </td>
+                </tr>
+                <tr>
+                    <td class="td_head">
+                        Registerd Voters:
+                    </td>
+                    <td id="td_reg" class="td_data">
+                    </td>
+                    <td class="td_head">
+                        Votes Cast:
+                    </td>
+                    <td id="td_votes" class="td_data">
+                    </td>
+                </tr>
+                <tr>
+                    <td class="td_head">
+                        ANC Votes
+                    </td>
+                    <td id="td_anc" class="td_data">
+                    </td>
+                    <td class="td_head">
+                        DA Votes
+                    </td>
+                    <td id="td_da" class="td_data">
+                    </td>
+                </tr>
+            </table>
+        </div>
+        <div id="nav_block">
+            <div id="pop" class="button white">Population</div>
+            <div id="wards" class="button white">Wards</div>
+            <div id="area" class="button white">Area</div>
+            <div id="turnout" class="button white">Turnout</div>
+            <div id="margin" class="button white">Margin</div>
+            <div id="map_type">Population</div>
+        </div>
+    </div>
+    <p id="map">
+        <script src="http://d3js.org/d3.v3.min.js"></script>
+        <script src="http://d3js.org//topojson.v1.min.js"></script>
+        <script src="http://d3js.org//queue.v1.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.5/leaflet.js"></script>
+        <script src="http://underscorejs.org/underscore-min.js"></script>
+        <script>
+        var DA = "#155fa2",
+            ANC = "#FFAA00",
+            other = "#008000";
+
+        var colors = ['#fff5f0', '#fee0d2', '#fcbba1', '#fc9272', '#fb6a4a', '#ef3b2c', '#cb181d', '#a50f15', '#67000d'];
+
+        var wards = false,
+            population = true,
+            area = false,
+            turnout = false,
+            margin = false;
+
+        var map = new L.Map("map", {
+                center: [-28.5, 25.9],
+                zoom: 6
+            })
+            .addLayer(new L.TileLayer(
+                //"http://stamen-tiles-{s}.a.ssl.fastly.net/toner-background/{z}/{x}/{y}.png"));
+                "http://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"));
+                //"http://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png")); 
+                //"http://stamen-tiles-{s}.a.ssl.fastly.net/toner-lite/{z}/{x}/{y}.png"));
+
+        var svg = d3.select(map.getPanes().overlayPane).append("svg"),
+            g = svg.append("g").attr("class", "leaflet-zoom-hide");
+
+        function draw_map(error, zajson, voter_info) {
+            if (error) throw error;
+            temp_voter_info = voter_info;
+            temp_zajson = zajson;
+            transform = d3.geo.transform({
+                point: projectPoint
+            });
+            path = d3.geo.path().projection(transform);
+
+            voting_map = d3.map();
+            voting_map_area = d3.map();
+
+            _.each(temp_zajson.objects.wards.geometries, function(d) {
+                voting_map_area.set(d.properties.WARD_ID, d.properties.Area);
+            });
+
+            voter_info.forEach(function(d) {
+                voting_map.set(d.ward, {
+                    "total": +d.total,
+                    "winning_number": +d.win_num,
+                    "anc": +d.anc,
+                    "da": +d.da,
+                    "winner": d.anc == d.win_num ? "anc" : d.da == d.win_num ? "da" : "other",
+                    "area": voting_map_area.get(d.ward),
+                    "reg": +d.reg,
+                    "turnout": +d.total / +d.reg,
+                    "margin": Math.abs(+d.anc - +d.da) / +d.win_num,
+                    "munic": _.find(zajson.objects.wards.geometries, function(e) {
+                        return e.properties.WARD_ID == d.ward ? true : false;
+                    }).properties.MUNICNAME
+                });
+            });
+
+            //anc_area = _.reduce(voting_map.values(), function (memo,d) { return memo + (d.winner == "anc" ? d.area : 0);},0);
+
+            var max_pop = d3.max(zajson.objects.wards.geometries, function(d) {
+                return d.properties.WARD_POP;
+            });
+
+            var ward_map = g.selectAll("path")
+                .data(topojson.feature(zajson, zajson.objects.wards).features)
+                .enter()
+                .append("path")
+                .on("mouseover", function(d) {
+                    d3.select(this).style("stroke-width", "2");
+                    var local_data = voting_map.get(d.properties.WARD_ID);
+                    d3.select("#td_ward").text(d.properties.WARD_ID);
+                    d3.select("#td_munic").text(d.properties.MUNICNAME);
+                    d3.select("#td_pop").text(d.properties.WARD_POP);
+                    d3.select("#td_area").html((+d.properties.Area).toFixed(1) + "km<sup>2</sup>");
+                    d3.select("#td_reg").text(local_data.reg);
+                    d3.select("#td_votes").text(local_data.total);
+                    d3.select("#td_turnout").text((local_data.turnout * 100).toFixed(1) + " %");
+                    d3.select("#td_margin").text((local_data.margin * 100).toFixed(1) + " %");
+                    d3.select("#td_anc").text(local_data.anc);
+                    d3.select("#td_da").text(local_data.da);
+                    // tooltip.style("visibility", "visible");
+                    // tooltip.html("Ward: " + d.properties.WARD_ID + "<br>" + "Population: " + population_map.get(d.properties.WARD_ID));
+                })
+                .on("mousemove", function() {
+                    // return tooltip
+                    //     .style("top", (d3.event.pageY - 10 + "px"))
+                    //     .style("left", (d3.event.pageX + 10 + "px"));
+                })
+                .on("mouseout", function() {
+                    if (population || area) {
+                    d3.select(this).style("stroke-width", "0");
+                    }
+                    else  {
+                        d3.select(this).style("stroke-width", "0");
+                    }
+                    //return tooltip.style("visibility", "hidden");
+                });
+
+
+            var cendtroids = g.selectAll(".dots")
+                .data(topojson.feature(zajson, zajson.objects.wards).features).enter().append("circle");
+
+            map.on("viewreset", reset);
+            reset();
+
+
+            d3.select("#wards").on("click", function() {
+                wards = true;
+                population = false;
+                area = false;
+                turnout = false;
+                margin = false;
+                d3.select("#map_type").text("Wards");
+                d3.selectAll("path").style("fill-opacity", ".1");
+                d3.selectAll("path").style("stroke-width", "0.2px");
+                reset();
+            });
+
+            d3.select("#pop").on("click", function() {
+                wards = false;
+                population = true;
+                area = false;
+                turnout = false;
+                margin = false;
+                d3.select("#map_type").text("Population");
+                d3.selectAll("path").style("fill-opacity", ".4");
+                d3.selectAll("path").style("fill", "white");
+                d3.selectAll("path").style("stroke-width", "0");
+                reset();
+            });
+
+            d3.select("#area").on("click", function() {
+                wards = false;
+                population = false;
+                area = true;
+                turnout = false;
+                margin = false;
+                d3.select("#map_type").text("Area");
+                d3.selectAll("path").style("fill-opacity", "0.8");
+                d3.selectAll("path").style("stroke-width", "0");
+                reset();
+            });
+
+            d3.select("#turnout").on("click", function() {
+                wards = false;
+                population = false;
+                area = false;
+                turnout = true;
+                margin = false;
+                d3.select("#map_type").text("Turnout");
+                d3.selectAll("path").style("fill-opacity", "0.5");
+                d3.selectAll("path").style("stroke-width", "0");
+                d3.selectAll("path").style("stroke-width", "0.2");
+                reset();
+            });
+
+            d3.select("#margin").on("click", function() {
+                wards = false;
+                population = false;
+                area = false;
+                turnout = false;
+                margin = true;
+                d3.select("#map_type").text("Margin");
+                d3.selectAll("path").style("fill-opacity", "0.5");
+                d3.selectAll("path").style("stroke-width", "0");
+                d3.selectAll("path").style("stroke-width", "0.2");
+                reset();
+            });
+
+            // Reposition the SVG to cover the features.
+            function reset() {
+                var bounds = path.bounds(topojson.feature(zajson, zajson.objects.prov)),
+                    topLeft = bounds[0],
+                    bottomRight = bounds[1];
+
+                svg.attr("width", bottomRight[0] - topLeft[0])
+                    .attr("height", bottomRight[1] - topLeft[1])
+                    .style("left", topLeft[0] + "px")
+                    .style("top", topLeft[1] + "px");
+
+                g.attr("transform", "translate(" + -topLeft[0] + "," + -topLeft[1] + ")");
+
+                ward_map.attr("d", path).style("fill", function(d) {
+                    if (turnout) {
+                        return colors[Math.round(colors.length * voting_map.get(d.properties.WARD_ID).turnout) - 1];
+                    } else if (margin) {
+                        return colors[Math.round(colors.length * voting_map.get(d.properties.WARD_ID).margin) - 1];
+                    } else if (wards || area) {
+                        if ((voting_map.get(d.properties.WARD_ID).anc > voting_map.get(d.properties.WARD_ID).da) && (voting_map.get(d.properties.WARD_ID).anc >= voting_map.get(d.properties.WARD_ID).winning_number)) {
+                            return ANC;
+                        } else if ((voting_map.get(d.properties.WARD_ID).da > voting_map.get(d.properties.WARD_ID).anc) && (voting_map.get(d.properties.WARD_ID).da >= voting_map.get(d.properties.WARD_ID).winning_number)) {
+                            return DA;
+                        } else {
+                            return other;
+                        }
+                    } else {
+                        return "white";
+                    }
+                });
+
+                cendtroids.attr("class", "dots")
+                    .style("fill", function(d) {
+                        if ((voting_map.get(d.properties.WARD_ID).anc > voting_map.get(d.properties.WARD_ID).da) && (voting_map.get(d.properties.WARD_ID).anc >= voting_map.get(d.properties.WARD_ID).winning_number)) {
+                            return ANC;
+                        } else if ((voting_map.get(d.properties.WARD_ID).da > voting_map.get(d.properties.WARD_ID).anc) && (voting_map.get(d.properties.WARD_ID).da >= voting_map.get(d.properties.WARD_ID).winning_number)) {
+                            return DA;
+                        } else {
+                            return other;
+                        }
+                    })
+                    .attr("r", function(d) {
+                        if (population) {
+                            return (map.getZoom() - 4) * (+d.properties.WARD_POP / max_pop);
+                        } else {
+
+                            if (area || turnout || margin) {
+                                return 0;
+                            } else {
+                                return map.getZoom() - 5;
+                            }
+                        }
+
+                    })
+                    .attr("opacity", function(d) {
+                        return 1; //0.5 + (0.5 * +d.properties.WARD_POP / max_pop);
+                    })
+                    .attr("cx", function(d) {
+                        return path.centroid(d)[0];
+                    })
+                    .attr("cy", function(d) {
+                        return path.centroid(d)[1];
+                    });
+
+            }
+
+            // Use Leaflet to implement a D3 geometric transformation.
+            function projectPoint(x, y) {
+                var point = map.latLngToLayerPoint(new L.LatLng(y, x));
+                this.stream.point(point.x, point.y);
+            }
+        }
+
+        queue()
+            .defer(d3.json, 'data/za.json')
+            .defer(d3.csv, 'data/lge_flat_all.csv')
+            .await(draw_map);
+        </script>
